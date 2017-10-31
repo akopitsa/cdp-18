@@ -27,7 +27,7 @@ resource "aws_eip" "nat" {
 
 resource "aws_security_group" "for-nat-instance" {
   //vpc_id      = "${aws_vpc.main.id}"
-  vpc_id  = "${var.vpc-id}"
+  vpc_id      = "${var.vpc-id}"
   name        = "security group for-nat-instance"
   description = "security group for-nat-instance"
 

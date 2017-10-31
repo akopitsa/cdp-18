@@ -34,7 +34,6 @@ resource "aws_elb" "my-elb" {
   }
 }
 
-
 resource "aws_security_group" "elb-securitygroup" {
   vpc_id      = "${var.elb_aws_vpc_main_id}"
   name        = "SG-for-elb"

@@ -2,36 +2,24 @@
 module "vpc-mod" {
   source = "../vpc"
 }
+
 module "elb" {
-  source = "../elb"
-  elb_aws_vpc_main_id = "${module.vpc-mod.aws_vpc_main_id}"
+  source                     = "../elb"
+  elb_aws_vpc_main_id        = "${module.vpc-mod.aws_vpc_main_id}"
   elb_aws_subnet_id_public_1 = "${module.vpc-mod.aws_subnet_id_1}"
   elb_aws_subnet_id_public_2 = "${module.vpc-mod.aws_subnet_id_2}"
 }
 
 resource "aws_security_group" "allow-ssh-puppet" {
-  vpc_id = "${module.vpc-mod.aws_vpc_main_id}"
-  name = "allow-ssh-puppet"
+  vpc_id      = "${module.vpc-mod.aws_vpc_main_id}"
+  name        = "allow-ssh-puppet"
   description = "security group that allows ssh and all egress traffic"
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["10.0.4.0/24", "10.0.5.0/24", "10.0.6.0/24"]
-  }
 
-  ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["10.0.4.0/24", "10.0.5.0/24", "10.0.6.0/24"]
-  }
-
-  ingress {
-    from_port   = 8140
-    to_port     = 8140
-    protocol    = "tcp"
-    cidr_blocks = ["10.0.4.0/24", "10.0.5.0/24", "10.0.6.0/24"]
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   ingress {
@@ -41,53 +29,39 @@ resource "aws_security_group" "allow-ssh-puppet" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  egress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+  ingress {
+    from_port       = 80
+    to_port         = 80
+    protocol        = "tcp"
+    security_groups = ["${module.elb.elb_sg_id}"]
   }
 
-  egress {
-    from_port   = 8140
-    to_port     = 8140
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+  ingress {
+    from_port       = 8140
+    to_port         = 8140
+    protocol        = "tcp"
+    security_groups = ["${module.elb.elb_sg_id}"]
   }
 
-  egress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["10.0.4.0/24", "10.0.5.0/24", "10.0.6.0/24"]
-  }
-tags {
+  tags {
     Name = "allow-ssh-puppet-port"
   }
 }
-
 
 data "template_file" "puppet-server" {
   template = "${file("./modules/server/install_server.sh")}"
 
   vars {
     //dns_name = "${aws_elb.my-elb.dns_name}"
-    dns_name = "${module.elb.elb-name}"
+    dns_name = "${module.elb.ELB}"
   }
 }
 
-resource "aws_launch_configuration" "example-launchconfig" {
+resource "aws_launch_configuration" "cdp-launchconfig" {
   name_prefix     = "PuppetServer-launchconfig"
   image_id        = "${lookup(var.AMIS, var.AWS_REGION)}"
   instance_type   = "t2.micro"
-  key_name = "${var.key_name}"
+  key_name        = "${var.key_name}"
   security_groups = ["${aws_security_group.allow-ssh-puppet.id}"]
 
   root_block_device {
@@ -104,13 +78,14 @@ resource "aws_launch_configuration" "example-launchconfig" {
   }
 }
 
-resource "aws_autoscaling_group" "example-autoscaling" {
+resource "aws_autoscaling_group" "cdp-autoscaling" {
   name = "PuppetServer-autoscaling"
 
   #vpc_zone_identifier  = ["${aws_subnet.main-public-1.id}", "${aws_subnet.main-public-2.id}"]
   #vpc_zone_identifier       = ["${aws_subnet.main-private-1.id}", "${aws_subnet.main-private-2.id}"]
-  vpc_zone_identifier       = ["${module.vpc-mod.aws_private_subnet_id_1}", "${module.vpc-mod.aws_private_subnet_id_2}"]
-  launch_configuration      = "${aws_launch_configuration.example-launchconfig.name}"
+  vpc_zone_identifier = ["${module.vpc-mod.aws_private_subnet_id_1}", "${module.vpc-mod.aws_private_subnet_id_2}"]
+
+  launch_configuration      = "${aws_launch_configuration.cdp-launchconfig.name}"
   min_size                  = 1
   max_size                  = 1
   health_check_grace_period = 300
@@ -125,21 +100,34 @@ resource "aws_autoscaling_group" "example-autoscaling" {
   }
 }
 
-
-
 // ===================================================================
-# resource "aws_instance" "puppet-server" {
-#     ami = "${var.AMI}"
-#     instance_type = "${var.instance_type}"
-#     key_name = "${var.key_name}"
-#     depends_on = ["aws_security_group.allow-ssh"]
-#     subnet_id = "${module.vpc-mod.aws_subnet_id_1}"
-#     vpc_security_group_ids = ["${aws_security_group.allow-ssh.id}"]
-#     root_block_device {
-#       volume_size = "12"
-#       delete_on_termination = true
-#     }
-#     tags {
-#       Name = "puppet-server"
-#     }
-# }
+data "template_file" "puppet-agent" {
+  template = "${file("./modules/server/install_agent.sh")}"
+
+  vars {
+    dns_name = "${module.elb.ELB}"
+  }
+}
+
+resource "aws_instance" "puppet-agent" {
+  ami           = "${lookup(var.AMIS, var.AWS_REGION)}"
+  instance_type = "t2.micro"
+
+  #    availability_zone = "${var.AVAILABILITY_ZONE}"
+  root_block_device {
+    volume_size           = "8"
+    delete_on_termination = true
+  }
+
+  vpc_security_group_ids = ["${aws_security_group.allow-ssh-puppet.id}"]
+  key_name               = "${var.key_name}"
+  subnet_id              = "${module.vpc-mod.aws_private_subnet_id_1}"
+  depends_on             = ["aws_security_group.allow-ssh-puppet"]
+
+  #user_data = "${file("agent_install.sh")}"
+  user_data = "${data.template_file.puppet-agent.rendered}"
+
+  tags {
+    Name = "PuppetAgent"
+  }
+}

@@ -1,3 +1,5 @@
+# MAIN TF NAT MODULE
+
 resource "aws_instance" "nat-instance" {
   ami                         = "ami-184dc970"
   instance_type               = "t2.micro"
